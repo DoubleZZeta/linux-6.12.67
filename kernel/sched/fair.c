@@ -8974,6 +8974,40 @@ again:
 	return task_of(se);
 }
 
+static bool can_schedule(struct rq *rq, struct task_struct *p)
+{
+	int entangled_cpu1 = READ_ONCE(sysctl_entangled_cpu1);
+	int entangled_cpu2 = READ_ONCE(sysctl_entangled_cpu2);
+	int cpu_x = cpu_of(rq);
+	int cpu_y;
+
+	if(entangled_cpu1 == entangled_cpu2)
+	{
+		return true; // No entanglement
+	}
+
+	if(cpu_x != entangled_cpu1 && cpu_x != entangled_cpu2)
+	{
+		return true; // Not on entangled CPUs
+	}
+
+	// Get the other entangled CPU
+	cpu_y = (cpu_x == entangled_cpu1) ? entangled_cpu2 : entangled_cpu1;
+
+	struct rq *rq_y = cpu_rq(cpu_y);
+	struct task_struct *curr_y = rq_y->curr;
+
+	if(is_idle_task(curr_y))
+	{
+		return true; // Other CPU is idle
+	}
+
+	uid_t uid_x = __kuid_val(task_uid(p));
+	uid_t uid_y = __kuid_val(task_uid(curr_y));
+
+	return uid_x == uid_y; // Can schedule if same user
+}
+
 static void __set_next_task_fair(struct rq *rq, struct task_struct *p, bool first);
 static void set_next_task_fair(struct rq *rq, struct task_struct *p, bool first);
 
@@ -8987,6 +9021,8 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf
 again:
 	p = pick_task_fair(rq);
 	if (!p)
+		goto idle;
+	if (!can_schedule(rq, p))
 		goto idle;
 	se = &p->se;
 
