@@ -59,6 +59,7 @@
 /* coursework1 code block - start */
 static unsigned int sysctl_entangled_cpu1 = 0;
 static unsigned int sysctl_entangled_cpu2 = 0;
+#define one_second = 1000000000UL;
 /* coursework1 code block - end */
 
 /*
@@ -9011,19 +9012,27 @@ static bool can_schedule(struct rq *rq, struct task_struct *p)
 static void __set_next_task_fair(struct rq *rq, struct task_struct *p, bool first);
 static void set_next_task_fair(struct rq *rq, struct task_struct *p, bool first);
 
+static bool swtich = false;
+static u64 cpu1_blcoked_since = 0;
+static u64 cpu2_blocked_since = 0;
+
 struct task_struct *
-pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
+(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	struct sched_entity *se;
 	struct task_struct *p;
 	int new_tasks;
+	int entangled_cpu1 = READ_ONCE(sysctl_entangled_cpu1);
+	int entangled_cpu2 = READ_ONCE(sysctl_entangled_cpu2);
 
 again:
 	p = pick_task_fair(rq);
 	if (!p)
 		goto idle;
 	if (!can_schedule(rq, p))
-		goto idle;
+	{
+		goto idle;	
+	}
 	se = &p->se;
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
