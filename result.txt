@@ -1,0 +1,33 @@
+Reading trace file: trace.txt...
+✅ Analyzing Entanglement for: CPU 3 and CPU 1
+   (Source: Auto-Detected from Trace (Activity Analysis))
+------------------------------------------------------------------------------------------
+Time            | CPU 3 Task                | CPU 1 Task                | Status
+------------------------------------------------------------------------------------------
+1265.593962     | test.001.sh (465)         | idle/sys                  | ✅ CPU 3 Running
+1266.562272     | idle/sys                  | test.001.sh (463)         | ✅ CPU 1 Running
+1269.473275     | work (467)                | idle/sys                  | ✅ CPU 3 Running
+1269.935415     | work (467)                | idle/sys                  | ✅ CPU 3 Running
+1269.935726     | work (467)                | idle/sys                  | ✅ CPU 3 Running
+1270.935631     | work (467)                | idle/sys                  | ✅ CPU 3 Running
+1270.935959     | work (467)                | work (469)                | ⚠️ VIOLATION
+1270.936149     | idle/sys                  | work (469)                | ✅ CPU 1 Running
+1270.936847     | idle/sys                  | work (469)                | ✅ CPU 1 Running
+1271.886164     | idle/sys                  | work (469)                | ✅ CPU 1 Running
+1271.886224     | work (467)                | work (469)                | ⚠️ VIOLATION
+1271.887085     | idle/sys                  | work (469)                | ✅ CPU 1 Running
+1271.887131     | work (467)                | work (469)                | ⚠️ VIOLATION
+1272.187133     | work (467)                | idle/sys                  | ✅ CPU 3 Running
+1272.985106     | work (467)                | idle/sys                  | ✅ CPU 3 Running
+1272.985176     | work (467)                | work (469)                | ⚠️ VIOLATION
+1272.986062     | idle/sys                  | work (469)                | ✅ CPU 1 Running
+1273.936097     | idle/sys                  | work (469)                | ✅ CPU 1 Running
+1273.945000     | idle/sys                  | work (469)                | ✅ CPU 1 Running
+1273.945527     | idle/sys                  | work (469)                | ✅ CPU 1 Running
+1273.945568     | work (467)                | work (469)                | ⚠️ VIOLATION
+1274.246036     | work (467)                | idle/sys                  | ✅ CPU 3 Running
+1274.985023     | work (467)                | idle/sys                  | ✅ CPU 3 Running
+1274.985105     | work (467)                | work (469)                | ⚠️ VIOLATION
+1275.286009     | idle/sys                  | work (469)                | ✅ CPU 1 Running
+------------------------------------------------------------------------------------------
+⚠️ FAILURE: Found 6 instances where both CPUs ran user tasks.

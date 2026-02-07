@@ -160,14 +160,14 @@ static struct ctl_table sched_fair_sysctls[] = {
 #endif /* CONFIG_NUMA_BALANCING */
 /* coursework1 code block - start */
 {
-	.procname	= "entangled_cpu1",
+	.procname	= "entangled_cpus_1",
 	.data		= &sysctl_entangled_cpu1,
 	.maxlen		= sizeof(unsigned int),
 	.mode		= 0644,
 	.proc_handler	= proc_dointvec_minmax,
 },
 {
-	.procname	= "entangled_cpu2",
+	.procname	= "entangled_cpus_2",
 	.data		= &sysctl_entangled_cpu2,
 	.maxlen		= sizeof(unsigned int),
 	.mode		= 0644,
@@ -9012,13 +9012,13 @@ again:
 			// Run if other cpu is idle
 			if (is_idle_task(curr_other))
 			{
-				WRITE_ONCE(current_active_cpu, this_cpu);
+				WRITE_ONCE(active_cpu, this_cpu);
 				WRITE_ONCE(cpu_start_running, ktime_get_ns());
 			}
 			// Let other run
 			else
 			{
-				WRITE_ONCE(current_active_cpu, other_cpu);
+				WRITE_ONCE(active_cpu, other_cpu);
 				WRITE_ONCE(cpu_start_running, ktime_get_ns());
 				goto idle;
 			}
@@ -9026,27 +9026,16 @@ again:
 		else if (current_active_cpu == this_cpu)
 		{
 			u64 time_elapsed = ktime_get_ns() - READ_ONCE(cpu_start_running);
-			// If the other cpu has been running for more than 100ms, switch
 			if (time_elapsed >= ONE_SECOND)
 			{
-				WRITE_ONCE(current_active_cpu, other_cpu);
+				WRITE_ONCE(active_cpu, other_cpu);
 				WRITE_ONCE(cpu_start_running, ktime_get_ns());
 				goto idle;
 			}
 		}
 		else
 		{
-			u64 time_elapsed = ktime_get_ns() - READ_ONCE(cpu_start_running);
-			// If the other cpu has been running for more than 100ms, switch
-			if (time_elapsed >= ONE_SECOND)
-			{
-				WRITE_ONCE(current_active_cpu, this_cpu);
-				WRITE_ONCE(cpu_start_running, ktime_get_ns());
-			}
-			else
-			{
-				goto idle;
-			}
+			goto idle;
 		}
 	}
 	se = &p->se;

@@ -255,7 +255,7 @@ ENDPROC(ftrace_graph_regs_caller)
 .purgem mcount_get_lr
 .purgem mcount_exit
 
-#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+#ifdef 
 ENTRY(return_to_handler)
 	stmdb	sp!, {r0-r3}
 	add	r0, sp, #16		@ sp at exit of instrumented routine
