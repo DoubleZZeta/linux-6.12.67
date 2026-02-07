@@ -59,7 +59,7 @@
 /* coursework1 code block - start */
 static unsigned int sysctl_entangled_cpu1 = 0;
 static unsigned int sysctl_entangled_cpu2 = 0;
-#define one_second = 1000000000UL;
+#define ONE_SECOND 1000000000UL
 /* coursework1 code block - end */
 
 /*
@@ -8975,63 +8975,79 @@ again:
 	return task_of(se);
 }
 
-static bool can_schedule(struct rq *rq, struct task_struct *p)
-{
-	int entangled_cpu1 = READ_ONCE(sysctl_entangled_cpu1);
-	int entangled_cpu2 = READ_ONCE(sysctl_entangled_cpu2);
-	int cpu_x = cpu_of(rq);
-	int cpu_y;
-
-	if(entangled_cpu1 == entangled_cpu2)
-	{
-		return true; // No entanglement
-	}
-
-	if(cpu_x != entangled_cpu1 && cpu_x != entangled_cpu2)
-	{
-		return true; // Not on entangled CPUs
-	}
-
-	// Get the other entangled CPU
-	cpu_y = (cpu_x == entangled_cpu1) ? entangled_cpu2 : entangled_cpu1;
-
-	struct rq *rq_y = cpu_rq(cpu_y);
-	struct task_struct *curr_y = rq_y->curr;
-
-	if(is_idle_task(curr_y))
-	{
-		return true; // Other CPU is idle
-	}
-
-	uid_t uid_x = __kuid_val(task_uid(p));
-	uid_t uid_y = __kuid_val(task_uid(curr_y));
-
-	return uid_x == uid_y; // Can schedule if same user
-}
 
 static void __set_next_task_fair(struct rq *rq, struct task_struct *p, bool first);
 static void set_next_task_fair(struct rq *rq, struct task_struct *p, bool first);
 
-static bool swtich = false;
-static u64 cpu1_blcoked_since = 0;
-static u64 cpu2_blocked_since = 0;
+static int active_cpu = -1;
+static u64 cpu_start_running = 0;
 
 struct task_struct *
-(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
+pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	struct sched_entity *se;
 	struct task_struct *p;
 	int new_tasks;
+
 	int entangled_cpu1 = READ_ONCE(sysctl_entangled_cpu1);
 	int entangled_cpu2 = READ_ONCE(sysctl_entangled_cpu2);
+	int this_cpu = cpu_of(rq);
 
 again:
 	p = pick_task_fair(rq);
 	if (!p)
 		goto idle;
-	if (!can_schedule(rq, p))
-	{
-		goto idle;	
+	if ((entangled_cpu1 != entangled_cpu2) && 
+		(this_cpu == entangled_cpu1 || this_cpu == entangled_cpu2))
+	{	
+		int current_active_cpu = READ_ONCE(active_cpu);
+
+		int other_cpu = (this_cpu == entangled_cpu1) ? entangled_cpu2 : entangled_cpu1;
+		struct rq *rq_other = cpu_rq(other_cpu);
+		struct task_struct *curr_other = rq_other->curr;
+
+		// At the start no cpu is set, pick one
+		if (current_active_cpu == -1)
+		{
+			// Run if other cpu is idle
+			if (is_idle_task(curr_other))
+			{
+				WRITE_ONCE(current_active_cpu, this_cpu);
+				WRITE_ONCE(cpu_start_running, ktime_get_ns());
+			}
+			// Let other run
+			else
+			{
+				WRITE_ONCE(current_active_cpu, other_cpu);
+				WRITE_ONCE(cpu_start_running, ktime_get_ns());
+				goto idle;
+			}
+		}
+		else if (current_active_cpu == this_cpu)
+		{
+			u64 time_elapsed = ktime_get_ns() - READ_ONCE(cpu_start_running);
+			// If the other cpu has been running for more than 100ms, switch
+			if (time_elapsed >= ONE_SECOND)
+			{
+				WRITE_ONCE(current_active_cpu, other_cpu);
+				WRITE_ONCE(cpu_start_running, ktime_get_ns());
+				goto idle;
+			}
+		}
+		else
+		{
+			u64 time_elapsed = ktime_get_ns() - READ_ONCE(cpu_start_running);
+			// If the other cpu has been running for more than 100ms, switch
+			if (time_elapsed >= ONE_SECOND)
+			{
+				WRITE_ONCE(current_active_cpu, this_cpu);
+				WRITE_ONCE(cpu_start_running, ktime_get_ns());
+			}
+			else
+			{
+				goto idle;
+			}
+		}
 	}
 	se = &p->se;
 
