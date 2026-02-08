@@ -10,7 +10,11 @@
 
 int main()
 {
-    // Get file descriptor 
+    int num_users;
+    char users[1024][256];
+    unsigned long cpu_times[1024];
+    
+    // Open the /proc directory 
     DIR *proc_dir = opendir("/proc");
     if (proc_dir == NULL) 
     {
@@ -39,7 +43,27 @@ int main()
 
             if(is_pid)
             {
-                print("%d\n", atoi(name));
+                char path[512];
+                snprintf(path, sizeof(path), "/proc/%s/stat", name);
+                FILE *status_file = fopen(path, "r");
+                if (status_file == NULL)
+                {
+                    perror("Failed to open status file");
+                    continue;
+                }
+
+                int pid;
+                char comm[256];
+                char state;
+                unsigned long utime, stime;
+                fscanf(status_file, "%d %s %c", &pid, comm, &state);
+                for(int j = 0; j < 10; j++)
+                {
+                    fscanf(status_file, "%*s");
+                }
+                fscanf(status_file, "%lu %lu", &utime, &stime);
+                printf("PID %d: utime=%lu stime=%lu total=%lu\n", pid, utime, stime, utime + stime);
+                fclose(status_file);
             }
         }
         else
@@ -47,7 +71,7 @@ int main()
             continue;
         }
     }
-    
+
     closedir(proc_dir);
     return 0;
 }

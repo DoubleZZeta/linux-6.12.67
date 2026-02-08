@@ -8979,8 +8979,10 @@ again:
 static void __set_next_task_fair(struct rq *rq, struct task_struct *p, bool first);
 static void set_next_task_fair(struct rq *rq, struct task_struct *p, bool first);
 
+#ifdef TASK_ONE
 static int active_cpu = -1;
 static u64 cpu_start_running = 0;
+#endif
 
 struct task_struct *
 pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
@@ -8989,14 +8991,18 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf
 	struct task_struct *p;
 	int new_tasks;
 
+	#ifdef TASK_ONE
 	int entangled_cpu1 = READ_ONCE(sysctl_entangled_cpu1);
 	int entangled_cpu2 = READ_ONCE(sysctl_entangled_cpu2);
 	int this_cpu = cpu_of(rq);
+	#endif
 
 again:
 	p = pick_task_fair(rq);
 	if (!p)
 		goto idle;
+
+	#ifdef TASK_ONE
 	if ((entangled_cpu1 != entangled_cpu2) && 
 		(this_cpu == entangled_cpu1 || this_cpu == entangled_cpu2))
 	{	
@@ -9038,6 +9044,7 @@ again:
 			goto idle;
 		}
 	}
+	#endif
 	se = &p->se;
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
