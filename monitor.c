@@ -47,8 +47,7 @@ char *get_username_from_uid(int pid)
     FILE *status_file = fopen(path, "r");
     if (status_file == NULL)
     {
-        perror("Failed to open status file");
-        return 0;
+        return NULL;
     }
 
     char line[256];
@@ -76,8 +75,7 @@ unsigned long get_process_cpu_time(int pid)
     FILE *stat_file = fopen(path, "r");
     if (stat_file == NULL)
     {
-        perror("Failed to open status file");
-        return 0;
+        return NULL;
     }
 
     char comm[256];
@@ -141,13 +139,19 @@ int main(int argc, char *argv[])
 
                 if(is_pid)
                 {
+
                     int pid = atoi(name);
+                    unsigned long cpu_time = get_process_cpu_time(pid);
+                    if(cpu_time == NULL)
+                    {
+                        continue;
+                    }
                     int exists = 0;
                     for (int j = 0; j < process_count; j++)
                     {
                         if (processes[j].pid == pid)
                         {
-                            processes[j].end = get_process_cpu_time(pid);
+                            processes[j].end = cpu_time;
                             exists = 1;
                             break;
                         }
@@ -155,7 +159,7 @@ int main(int argc, char *argv[])
                     if(!exists)
                     {
                         processes[process_count].pid = pid;
-                        processes[process_count].start = get_process_cpu_time(pid);
+                        processes[process_count].start = cpu_time;
                         processes[process_count].end = processes[process_count].start;
                         process_count++;
                     }
@@ -176,6 +180,10 @@ int main(int argc, char *argv[])
     for(int i = 0; i < process_count; i++)
     {
         char *username = get_username_from_uid(processes[i].pid);
+        if(username == NULL)
+        {
+            continue;
+        }
         int exists = 0;
         for (int j = 0; j < user_count; j++)
         {
