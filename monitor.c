@@ -211,5 +211,5 @@ int main(int argc, char *argv[])
         printf("%-6d %-20s %lu\n", i + 1, users[i].name, users[i].cpu_time);
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }
