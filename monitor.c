@@ -8,9 +8,34 @@
 #include <pwd.h>        // getpwuid (convert UID to username)
 #include <ctype.h>      // isdigit
 
+struct user
+{
+    char name[256];
+    unsigned long cpu_time;
+    
+};
+
+int compare_users(const void *a, const void *b) {
+    struct user *ua = (struct user *)a;
+    struct user *ub = (struct user *)b;
+    
+    // Descending order (highest first)
+    if (ub->cpu_time > ua->cpu_time)
+    {
+        return 1;
+    }
+    if (ub->cpu_time < ua->cpu_time)
+    {
+        return -1;
+    }
+    return 0;
+}
+
 unsigned long get_process_cpu_time(char* name)
 {
     char path[512];
+    long ticks_per_sec = sysconf(_SC_CLK_TCK);
+
     snprintf(path, sizeof(path), "/proc/%s/stat", name);
     FILE *stat_file = fopen(path, "r");
     if (stat_file == NULL)
@@ -30,8 +55,10 @@ unsigned long get_process_cpu_time(char* name)
     }
     fscanf(stat_file, "%lu %lu", &utime, &stime);
     fclose(stat_file);
+
+    unsigned long time_in_ms = (utime + stime) * 1000 / ticks_per_sec;
     
-    return utime + stime;
+    return time_in_ms;
 }
 
 char *get_username_from_uid(char *name)
@@ -63,11 +90,18 @@ char *get_username_from_uid(char *name)
     return username;
 }
 
-int main()
+
+int main(int argc, char *argv[])
 {
+    if (argc != 2) 
+    {
+        fprintf(stderr, "Usage: %s <seconds>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    int duration = atoi(argv[1]); 
     int num_users;
-    char users[1024][256];
-    unsigned long cpu_times[1024];
+    struct user users[1024];
     int user_count = 0;
     
     // Open the /proc directory 
@@ -102,18 +136,36 @@ int main()
                 char *username = get_username_from_uid(name);
                 unsigned long cpu_time = get_process_cpu_time(name);
 
-                strncpy(users[user_count], username, sizeof(users[user_count]) - 1);
-                users[user_count][sizeof(users[user_count]) - 1] = '\0';
-                cpu_times[user_count] = cpu_time;
-                user_count++;
-                
-                printf("Process: %s, User: %s, CPU Time: %lu\n", name, username, cpu_time);
+                int exists = 0;
+                for (int j = 0; j < user_count; j++)
+                {
+                    if (strcmp(users[j].name, username) == 0)
+                    {
+                        users[j].cpu_time += cpu_time;
+                        exists = 1;
+                        break;
+                    }
+                }
+                if (!exists) // new user
+                {
+                    strncpy(users[user_count].name, username, sizeof(users[user_count].name) - 1);
+                    users[user_count].name[sizeof(users[user_count].name) - 1] = '\0';
+                    users[user_count].cpu_time = cpu_time;
+                    user_count++;
+                }
             }
         }
         else
         {
             continue;
         }
+    }
+
+    qsort(users, user_count, sizeof(struct user), compare_users);
+    printf("%-6s %-20s %s\n", "Rank", "User", "CPU Time (milliseconds)");
+    printf("----------------------------------------\n");
+    for (int i = 0; i < user_count; i++) {
+        printf("%-6d %-20s %lu\n", i + 1, users[i].name, users[i].cpu_time);
     }
 
     closedir(proc_dir);
