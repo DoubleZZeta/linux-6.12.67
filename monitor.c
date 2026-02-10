@@ -119,6 +119,8 @@ int main(int argc, char *argv[])
     int process_count = 0;
     while(duration > 0)
     {
+        rewinddir(proc_dir);  // Go back to start of /proc
+
         struct dirent *entry;
         while ((entry = readdir(proc_dir)) != NULL)
         {
@@ -140,17 +142,23 @@ int main(int argc, char *argv[])
                 if(is_pid)
                 {
                     int pid = atoi(name);
+                    int exists = 0;
                     for (int j = 0; j < process_count; j++)
                     {
                         if (processes[j].pid == pid)
                         {
                             processes[j].end = get_process_cpu_time(pid);
+                            exists = 1;
                             break;
                         }
                     }
-                    processes[process_count].pid = pid;
-                    processes[process_count].start = get_process_cpu_time(pid);
-                    process_count++;
+                    if(!exists)
+                    {
+                        processes[process_count].pid = pid;
+                        processes[process_count].start = get_process_cpu_time(pid);
+                        processes[process_count].end = processes[process_count].start;
+                        process_count++;
+                    }
                 }
             }
             else
@@ -168,18 +176,23 @@ int main(int argc, char *argv[])
     for(int i = 0; i < process_count; i++)
     {
         char *username = get_username_from_uid(processes[i].pid);
+        int exists = 0;
         for (int j = 0; j < user_count; j++)
         {
             if (strcmp(users[j].name, username) == 0)
             {
                 users[j].cpu_time += processes[i].end - processes[i].start;
+                exists = 1;
                 break;
             }
         }
-        users[user_count].cpu_time += processes[i].end - processes[i].start;
-        strncpy(users[user_count].name, username, sizeof(users[user_count].name) - 1);
-        users[user_count].name[sizeof(users[user_count].name) - 1] = '\0';
-        user_count++;
+        if(!exists)
+        {
+            users[user_count].cpu_time = processes[i].end - processes[i].start;
+            strncpy(users[user_count].name, username, sizeof(users[user_count].name) - 1);
+            users[user_count].name[sizeof(users[user_count].name) - 1] = '\0';
+            user_count++;
+        }
     }
 
     qsort(users, user_count, sizeof(struct user), compare_users);
