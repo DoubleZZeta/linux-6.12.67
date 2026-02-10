@@ -62,7 +62,7 @@ char *get_username_from_uid(int pid)
     fclose(status_file);
 
     struct passwd *pw = getpwuid(uid);
-    char *username = pw ? pw->pw_name : "unknown"; // need to revise 
+    char *username = pw ? pw->pw_name : NULL; // need to revise 
     return username;
 }
 
@@ -75,7 +75,7 @@ unsigned long get_process_cpu_time(int pid)
     FILE *stat_file = fopen(path, "r");
     if (stat_file == NULL)
     {
-        return NULL;
+        return -1;
     }
 
     char comm[256];
@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
 
                     int pid = atoi(name);
                     unsigned long cpu_time = get_process_cpu_time(pid);
-                    if(cpu_time == NULL)
+                    if((long)cpu_time == -1)
                     {
                         continue;
                     }
