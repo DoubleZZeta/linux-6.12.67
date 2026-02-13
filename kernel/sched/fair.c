@@ -1285,7 +1285,6 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	// Initialize user tracking on first call
 	init_user_tracking_lazy();
 
-	s64 scaled_delta_exec = delta_exec;
 	if (entity_is_task(curr)) 
 	{
 		struct task_struct *p = task_of(curr);
@@ -1304,15 +1303,40 @@ static void update_curr(struct cfs_rq *cfs_rq)
 				u64 target_exec_time = wall_clock_time / active_users;  // Calculate target exec time per user
 				u64 actual_exec_time = user_cpu_time[index];
 				
-				u64 scaling_factor = 1000000ULL;  // Default: 1.0 in scaled units
+				// Calculate weight scaling factor inversely to user CPU consumption
+				// Higher consumption = lower weight = higher vruntime growth
+				u64 weight_scale = 1000000ULL;  // Default: 1.0 (no scaling)
 				if (target_exec_time > 0)
 				{
-					scaling_factor = (actual_exec_time * 1000000ULL) / target_exec_time;
+					u64 ratio = (actual_exec_time * 1000000ULL) / target_exec_time;
+					// Use inverse ratio: if user got 2x fair share, weight becomes 0.5x
+					// This causes vruntime to grow 2x faster: vruntime_delta = (delta * load) / weight
+					weight_scale = (1000000ULL * 1000000ULL) / ratio;  // Inverse ratio for weight
 				}
 
-				scaled_delta_exec = (delta_exec * scaling_factor) / 1000000ULL;  // Scale delta_exec by the calculated factor
-				// Prevent underflow: ensure scaled_delta is at least 1
-				scaled_delta_exec = max(1LL, scaled_delta_exec);
+				// Temporarily reduce task weight to increase vruntime growth
+				unsigned long orig_weight = curr->load.weight;
+				curr->load.weight = max((unsigned long)1, (orig_weight * weight_scale) / 1000000ULL);
+				
+				curr->vruntime += calc_delta_fair(delta_exec, curr);
+				
+				// Restore original weight
+				curr->load.weight = orig_weight;
+				
+				update_curr_task(p, delta_exec);
+
+				/*
+				 * If the fair_server is active, we need to account for the
+				 * fair_server time whether or not the task is running on
+				 * behalf of fair_server or not:
+				 */
+				if (dl_server_active(&rq->fair_server))
+					dl_server_update(&rq->fair_server, delta_exec);
+				
+				resched = update_deadline(cfs_rq, curr);
+				account_cfs_rq_runtime(cfs_rq, delta_exec);
+				
+				return;
 			}
 		}
 
@@ -1333,7 +1357,7 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	}
 
 
-	curr->vruntime += calc_delta_fair(scaled_delta_exec, curr);
+	curr->vruntime += calc_delta_fair(delta_exec, curr);
 	resched = update_deadline(cfs_rq, curr);
 
 	account_cfs_rq_runtime(cfs_rq, delta_exec);

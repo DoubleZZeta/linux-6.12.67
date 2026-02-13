@@ -7,7 +7,6 @@
 #include <unistd.h>     // sleep, sysconf
 #include <pwd.h>        // getpwuid (convert UID to username)
 #include <ctype.h>      // isdigit
-#include <stdlib.h>     // malloc, free, EXIT_FAILURE
 
 struct user
 {
