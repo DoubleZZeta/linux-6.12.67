@@ -7,6 +7,7 @@
 #include <unistd.h>     // sleep, sysconf
 #include <pwd.h>        // getpwuid (convert UID to username)
 #include <ctype.h>      // isdigit
+#include <stdlib.h>     // malloc, free, EXIT_FAILURE
 
 struct user
 {
@@ -62,7 +63,14 @@ char *get_username_from_uid(int pid)
     fclose(status_file);
 
     struct passwd *pw = getpwuid(uid);
-    char *username = pw ? pw->pw_name : NULL; // need to revise 
+    if (pw == NULL)
+        return NULL;
+    
+    // Make a copy of the username string to avoid it being overwritten
+    char *username = malloc(strlen(pw->pw_name) + 1);
+    if (username != NULL)
+        strcpy(username, pw->pw_name);
+    
     return username;
 }
 
@@ -209,6 +217,14 @@ int main(int argc, char *argv[])
     for (int i = 0; i < user_count; i++) 
     {
         printf("%-6d %-20s %lu\n", i + 1, users[i].name, users[i].cpu_time);
+    }
+
+    // Free allocated memory for usernames
+    for (int i = 0; i < process_count; i++)
+    {
+        char *username = get_username_from_uid(processes[i].pid);
+        if (username != NULL)
+            free(username);
     }
 
     return EXIT_SUCCESS;

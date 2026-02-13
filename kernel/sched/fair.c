@@ -56,11 +56,55 @@
 #include "autogroup.h"
 
 
-/* coursework1 code block - start */
+/* Task1 code block - start */
 static unsigned int sysctl_entangled_cpu1 = 0;
 static unsigned int sysctl_entangled_cpu2 = 0;
 #define ONE_SECOND 1000000000UL
-/* coursework1 code block - end */
+/* Task1 code block - end */
+
+/* Task2 code block - start */
+#define MAX_USERS 1024
+static u64 user_cpu_time[MAX_USERS];
+static u64 start_time;
+
+
+static int uid_to_index(uid_t uid) 
+{
+	if(uid >= 1000 && uid < 1000 + MAX_USERS) 
+	{
+		return uid - 1000;
+	} 
+	else 
+	{
+		return -1; // UID not considered for tracking
+	}
+}
+
+static int count_active_users(void) 
+{
+	int count = 0;
+	for (int i = 0; i < MAX_USERS; i++) 
+	{
+		if (user_cpu_time[i] > 0) 
+		{
+			count++;
+		}
+	}
+	return count;  
+}
+
+// Lazy initialization - will be called on first update_curr
+static void init_user_tracking_lazy(void)
+{
+	if (start_time == 0) {
+		start_time = ktime_get_ns();
+		memset(user_cpu_time, 0, sizeof(user_cpu_time));
+	}
+}
+
+
+
+/* Task2 code block - end */
 
 /*
  * The initial- and re-scaling of tunables is configurable
@@ -1238,11 +1282,39 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	if (unlikely(delta_exec <= 0))
 		return;
 
-	curr->vruntime += calc_delta_fair(delta_exec, curr);
-	resched = update_deadline(cfs_rq, curr);
+	// Initialize user tracking on first call
+	init_user_tracking_lazy();
 
-	if (entity_is_task(curr)) {
+	s64 scaled_delta_exec = delta_exec;
+	if (entity_is_task(curr)) 
+	{
 		struct task_struct *p = task_of(curr);
+
+    	uid_t uid = __kuid_val(task_uid(p));  // Direct UID extraction
+		int index = uid_to_index(uid);  // Map UID to index
+		if (index >= 0) 
+		{
+			user_cpu_time[index] += delta_exec;  // Accumulate CPU time for the user
+
+			u64 wall_clock_time = ktime_get_ns() - start_time;  // Calculate wall clock time since module load
+			int active_users = count_active_users();  // Count active users
+			
+			if (wall_clock_time > 0 && active_users > 0) 
+			{
+				u64 target_exec_time = wall_clock_time / active_users;  // Calculate target exec time per user
+				u64 actual_exec_time = user_cpu_time[index];
+				
+				u64 scaling_factor = 1000000ULL;  // Default: 1.0 in scaled units
+				if (target_exec_time > 0)
+				{
+					scaling_factor = (actual_exec_time * 1000000ULL) / target_exec_time;
+				}
+
+				scaled_delta_exec = (delta_exec * scaling_factor) / 1000000ULL;  // Scale delta_exec by the calculated factor
+				// Prevent underflow: ensure scaled_delta is at least 1
+				scaled_delta_exec = max(1LL, scaled_delta_exec);
+			}
+		}
 
 		update_curr_task(p, delta_exec);
 
@@ -1259,6 +1331,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
 		if (dl_server_active(&rq->fair_server))
 			dl_server_update(&rq->fair_server, delta_exec);
 	}
+
+
+	curr->vruntime += calc_delta_fair(scaled_delta_exec, curr);
+	resched = update_deadline(cfs_rq, curr);
 
 	account_cfs_rq_runtime(cfs_rq, delta_exec);
 
