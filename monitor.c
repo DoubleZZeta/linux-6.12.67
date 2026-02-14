@@ -18,6 +18,7 @@ struct user
 struct process
 {
     int pid;
+    char *username;
     unsigned long start;
     unsigned long end;
 };
@@ -152,7 +153,7 @@ int main(int argc, char *argv[])
                     if((long)cpu_time == -1)
                     {
                         continue;
-                    }
+                    } 
                     int exists = 0;
                     for (int j = 0; j < process_count; j++)
                     {
@@ -166,6 +167,7 @@ int main(int argc, char *argv[])
                     if(!exists)
                     {
                         processes[process_count].pid = pid;
+                        processes[process_count].username = get_username_from_uid(pid);
                         processes[process_count].start = cpu_time;
                         processes[process_count].end = processes[process_count].start;
                         process_count++;
@@ -180,21 +182,22 @@ int main(int argc, char *argv[])
         sleep(1);
         duration--;
     }
+
     closedir(proc_dir);
 
     struct user users[1024];
     int user_count = 0;
     for(int i = 0; i < process_count; i++)
     {
-        char *username = get_username_from_uid(processes[i].pid);
-        if(username == NULL)
+        
+        if(processes[i].username == NULL)
         {
             continue;
         }
         int exists = 0;
         for (int j = 0; j < user_count; j++)
         {
-            if (strcmp(users[j].name, username) == 0)
+            if (strcmp(users[j].name, processes[i].username) == 0)
             {
                 users[j].cpu_time += processes[i].end - processes[i].start;
                 exists = 1;
@@ -204,7 +207,7 @@ int main(int argc, char *argv[])
         if(!exists)
         {
             users[user_count].cpu_time = processes[i].end - processes[i].start;
-            strncpy(users[user_count].name, username, sizeof(users[user_count].name) - 1);
+            strncpy(users[user_count].name, processes[i].username, sizeof(users[user_count].name) - 1);
             users[user_count].name[sizeof(users[user_count].name) - 1] = '\0';
             user_count++;
         }
@@ -221,9 +224,10 @@ int main(int argc, char *argv[])
     // Free allocated memory for usernames
     for (int i = 0; i < process_count; i++)
     {
-        char *username = get_username_from_uid(processes[i].pid);
-        if (username != NULL)
-            free(username);
+        if (processes[i].username != NULL)
+        {
+            free(processes[i].username);
+        }
     }
 
     return EXIT_SUCCESS;
