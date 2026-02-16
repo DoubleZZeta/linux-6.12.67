@@ -64,46 +64,44 @@ static unsigned int sysctl_entangled_cpu2 = 0;
 
 /* Task2 code block - start */
 #define MAX_USERS 1024
-static u64 user_cpu_time[MAX_USERS];
-static u64 start_time;
+static int task_count_cache = [MAX_USERS];
+// static u64 user_cpu_time[MAX_USERS];
+// static u64 start_time = 0;
 
 
-static int uid_to_index(uid_t uid) 
-{
-	if(uid >= 1000 && uid < 1000 + MAX_USERS) 
-	{
-		return uid - 1000;
-	} 
-	else 
-	{
-		return -1; // UID not considered for tracking
-	}
-}
+// static int uid_to_index(uid_t uid) 
+// {
+// 	if(uid >= 1000 && uid < 1000 + MAX_USERS) 
+// 	{
+// 		return uid - 1000;
+// 	} 
+// 	else 
+// 	{
+// 		return -1; // UID not considered for tracking
+// 	}
+// }
 
-static int count_active_users(void) 
-{
-	int count = 0;
-	for (int i = 0; i < MAX_USERS; i++) 
-	{
-		if (user_cpu_time[i] > 0) 
-		{
-			count++;
-		}
-	}
-	return count;  
-}
+// static int count_active_users(void) 
+// {
+// 	int count = 0;
+// 	for (int i = 0; i < MAX_USERS; i++) 
+// 	{
+// 		if (user_cpu_time[i] > 0) 
+// 		{
+// 			count++;
+// 		}
+// 	}
+// 	return count;  
+// }
 
-// Lazy initialization - will be called on first update_curr
-static void init_user_tracking_lazy(void)
-{
-	if (start_time == 0) {
-		start_time = ktime_get_ns();
-		memset(user_cpu_time, 0, sizeof(user_cpu_time));
-	}
-}
-
-
-
+// // Lazy initialization - will be called on first update_curr
+// static void init_user_tracking_lazy(void)
+// {
+// 	if (start_time == 0) {
+// 		start_time = ktime_get_ns();
+// 		memset(user_cpu_time, 0, sizeof(user_cpu_time));
+// 	}
+// }
 /* Task2 code block - end */
 
 /*
@@ -1265,6 +1263,22 @@ s64 update_curr_common(struct rq *rq)
 	return delta_exec;
 }
 
+/* Count all tasks globally for a specific user */
+static int count_user_tasks_global(uid_t uid)
+{
+    int count = 0;
+    struct task_struct *p;
+    
+    rcu_read_lock();
+    for_each_process(p) {
+        if (__kuid_val(task_uid(p)) == uid) {
+            count++;
+        }
+    }
+    rcu_read_unlock();
+    return count;
+}
+
 /*
  * Update the current task's runtime statistics.
  */
@@ -1282,63 +1296,25 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	if (unlikely(delta_exec <= 0))
 		return;
 
-	// Initialize user tracking on first call
-	init_user_tracking_lazy();
-
-	if (entity_is_task(curr)) 
+	if (entity_is_task(curr))
 	{
 		struct task_struct *p = task_of(curr);
+		uid_t uid = __kuid_val(task_uid(p));
+		int task_count = count_user_tasks_global(uid);
 
-    	uid_t uid = __kuid_val(task_uid(p));  // Direct UID extraction
-		int index = uid_to_index(uid);  // Map UID to index
-		if (index >= 0) 
+		if(uid >= 1000 && uid < 1000 + MAX_USERS)
 		{
-			user_cpu_time[index] += delta_exec;  // Accumulate CPU time for the user
-
-			u64 wall_clock_time = ktime_get_ns() - start_time;  // Calculate wall clock time since module load
-			int active_users = count_active_users();  // Count active users
-			
-			if (wall_clock_time > 0 && active_users > 0) 
-			{
-				u64 target_exec_time = wall_clock_time / active_users;  // Calculate target exec time per user
-				u64 actual_exec_time = user_cpu_time[index];
-				
-				// Calculate weight scaling factor inversely to user CPU consumption
-				// Higher consumption = lower weight = higher vruntime growth
-				u64 weight_scale = 1000000ULL;  // Default: 1.0 (no scaling)
-				if (target_exec_time > 0)
-				{
-					u64 ratio = (actual_exec_time * 1000000ULL) / target_exec_time;
-					// Use inverse ratio: if user got 2x fair share, weight becomes 0.5x
-					// This causes vruntime to grow 2x faster: vruntime_delta = (delta * load) / weight
-					weight_scale = (1000000ULL * 1000000ULL) / ratio;  // Inverse ratio for weight
-				}
-
-				// Temporarily reduce task weight to increase vruntime growth
-				unsigned long orig_weight = curr->load.weight;
-				curr->load.weight = max((unsigned long)1, (orig_weight * weight_scale) / 1000000ULL);
-				
-				curr->vruntime += calc_delta_fair(delta_exec, curr);
-				
-				// Restore original weight
-				curr->load.weight = orig_weight;
-				
-				update_curr_task(p, delta_exec);
-
-				/*
-				 * If the fair_server is active, we need to account for the
-				 * fair_server time whether or not the task is running on
-				 * behalf of fair_server or not:
-				 */
-				if (dl_server_active(&rq->fair_server))
-					dl_server_update(&rq->fair_server, delta_exec);
-				
-				resched = update_deadline(cfs_rq, curr);
-				account_cfs_rq_runtime(cfs_rq, delta_exec);
-				
-				return;
-			}
+			delta_exec *= task_count;
+			if (printk_ratelimit())
+				printk(KERN_INFO "PID %d UID %u: task_count=%d\n", p->pid, uid, task_count);
 		}
+	}
+
+	curr->vruntime += calc_delta_fair(delta_exec, curr);
+	resched = update_deadline(cfs_rq, curr);
+
+	if (entity_is_task(curr)) {
+		struct task_struct *p = task_of(curr);
 
 		update_curr_task(p, delta_exec);
 
@@ -1355,10 +1331,6 @@ static void update_curr(struct cfs_rq *cfs_rq)
 		if (dl_server_active(&rq->fair_server))
 			dl_server_update(&rq->fair_server, delta_exec);
 	}
-
-
-	curr->vruntime += calc_delta_fair(delta_exec, curr);
-	resched = update_deadline(cfs_rq, curr);
 
 	account_cfs_rq_runtime(cfs_rq, delta_exec);
 
