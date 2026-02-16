@@ -64,44 +64,47 @@ static unsigned int sysctl_entangled_cpu2 = 0;
 
 /* Task2 code block - start */
 #define MAX_USERS 1024
-static int task_count_cache = [MAX_USERS];
-// static u64 user_cpu_time[MAX_USERS];
-// static u64 start_time = 0;
+#define TIME_OUT_MS 1000
 
+static int task_count_cache[MAX_USERS] = {0};
+static u64 last_cache_update[MAX_USERS] = {0};
 
-// static int uid_to_index(uid_t uid) 
-// {
-// 	if(uid >= 1000 && uid < 1000 + MAX_USERS) 
-// 	{
-// 		return uid - 1000;
-// 	} 
-// 	else 
-// 	{
-// 		return -1; // UID not considered for tracking
-// 	}
-// }
+static inline int uid_to_index(uid_t uid) 
+{
+	if(uid >= 1000 && uid < 1000 + MAX_USERS) 
+	{
+		return uid - 1000;
+	} 
+	else 
+	{
+		return -1; // UID not considered for tracking
+	}
+}
 
-// static int count_active_users(void) 
-// {
-// 	int count = 0;
-// 	for (int i = 0; i < MAX_USERS; i++) 
-// 	{
-// 		if (user_cpu_time[i] > 0) 
-// 		{
-// 			count++;
-// 		}
-// 	}
-// 	return count;  
-// }
+/* Count all tasks globally for a specific user */
+static int count_user_tasks_global(uid_t uid, u64 now)
+{
+	int count = 0;
+	struct task_struct *p;
+	int index = uid_to_index(uid);
 
-// // Lazy initialization - will be called on first update_curr
-// static void init_user_tracking_lazy(void)
-// {
-// 	if (start_time == 0) {
-// 		start_time = ktime_get_ns();
-// 		memset(user_cpu_time, 0, sizeof(user_cpu_time));
-// 	}
-// }
+	rcu_read_lock();
+	for_each_process(p) {
+		if (__kuid_val(task_uid(p)) == uid) {
+			count++;
+		}
+	}
+	rcu_read_unlock();
+
+	if(count > 0)
+	{
+		task_count_cache[index] = count;
+		last_cache_update[index] = now;
+	}
+	
+	return task_count_cache[index] > 0 ? task_count_cache[index] : 1;
+}
+
 /* Task2 code block - end */
 
 /*
@@ -1263,22 +1266,6 @@ s64 update_curr_common(struct rq *rq)
 	return delta_exec;
 }
 
-/* Count all tasks globally for a specific user */
-static int count_user_tasks_global(uid_t uid)
-{
-    int count = 0;
-    struct task_struct *p;
-    
-    rcu_read_lock();
-    for_each_process(p) {
-        if (__kuid_val(task_uid(p)) == uid) {
-            count++;
-        }
-    }
-    rcu_read_unlock();
-    return count;
-}
-
 /*
  * Update the current task's runtime statistics.
  */
@@ -1300,14 +1287,29 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	{
 		struct task_struct *p = task_of(curr);
 		uid_t uid = __kuid_val(task_uid(p));
-		int task_count = count_user_tasks_global(uid);
+    	int task_count = 1;
+        int index = uid_to_index(uid);
 
-		if(uid >= 1000 && uid < 1000 + MAX_USERS)
-		{
-			delta_exec *= task_count;
-			if (printk_ratelimit())
-				printk(KERN_INFO "PID %d UID %u: task_count=%d\n", p->pid, uid, task_count);
-		}
+        if(index >= 0)
+        {
+            u64 now = ktime_get_ns() / 1000000;
+            u64 last = last_cache_update[index];
+
+            if(now - last < TIME_OUT_MS && task_count_cache[index] > 0)
+            {
+                /* Cache is fresh, use it */
+                task_count = task_count_cache[index];
+            }
+            else
+            {
+                /* Cache expired or empty, recalculate */
+                task_count = count_user_tasks_global(uid, now);
+            }
+
+            delta_exec *= task_count;
+            if (printk_ratelimit())
+                printk(KERN_INFO "PID %d UID %u: task_count=%d\n", p->pid, uid, task_count);
+        }
 	}
 
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
