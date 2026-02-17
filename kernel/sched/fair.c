@@ -64,45 +64,44 @@ static unsigned int sysctl_entangled_cpu2 = 0;
 
 /* Task2 code block - start */
 #define MAX_USERS 1024
-#define TIME_OUT_MS 1000
 
-static int task_count_cache[MAX_USERS] = {0};
-static u64 last_cache_update[MAX_USERS] = {0};
-
-static inline int uid_to_index(uid_t uid) 
+static inline int uid_to_index(uid_t uid)
 {
-	if(uid >= 1000 && uid < 1000 + MAX_USERS) 
-	{
-		return uid - 1000;
-	} 
-	else 
-	{
-		return -1; // UID not considered for tracking
-	}
+    if (uid >= 1000 && uid < 1000 + MAX_USERS)
+    {
+        return uid - 1000;
+    }
+    else
+    {
+        return -1;
+    }
 }
 
-/* Count all tasks globally for a specific user */
-static int count_user_tasks_global(uid_t uid, u64 now)
+/* Count tasks for a specific user on the given cfs_rq's rb-tree */
+static int count_user_tasks_on_rq(struct cfs_rq *cfs_rq, uid_t uid)
 {
-	int count = 0;
-	struct task_struct *p;
-	int index = uid_to_index(uid);
+    struct rb_node *node;
+    struct sched_entity *se;
+    int count = 0;
 
-	rcu_read_lock();
-	for_each_process(p) {
-		if (__kuid_val(task_uid(p)) == uid) {
-			count++;
-		}
-	}
-	rcu_read_unlock();
+    /* Count current running entity if it belongs to this user */
+    if (cfs_rq->curr && entity_is_task(cfs_rq->curr)) {
+        struct task_struct *p = task_of(cfs_rq->curr);
+        if (__kuid_val(task_uid(p)) == uid)
+            count++;
+    }
 
-	if(count > 0)
-	{
-		task_count_cache[index] = count;
-		last_cache_update[index] = now;
-	}
-	
-	return task_count_cache[index] > 0 ? task_count_cache[index] : 1;
+    /* Walk the rb-tree of queued entities */
+    for (node = rb_first_cached(&cfs_rq->tasks_timeline); node; node = rb_next(node)) {
+        se = rb_entry(node, struct sched_entity, run_node);
+        if (entity_is_task(se)) {
+            struct task_struct *p = task_of(se);
+            if (__kuid_val(task_uid(p)) == uid)
+                count++;
+        }
+    }
+
+    return count > 0 ? count : 1;
 }
 
 /* Task2 code block - end */
@@ -1285,26 +1284,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
 
 	if (entity_is_task(curr))
 	{
-		struct task_struct *p = task_of(curr);
-		uid_t uid = __kuid_val(task_uid(p));
-    	int task_count = 1;
+        struct task_struct *p = task_of(curr);
+        uid_t uid = __kuid_val(task_uid(p));
         int index = uid_to_index(uid);
 
-        if(index >= 0)
+        if (index >= 0)
         {
-            u64 now = ktime_get_ns() / 1000000;
-            u64 last = last_cache_update[index];
-
-            if(now - last < TIME_OUT_MS && task_count_cache[index] > 0)
-            {
-                /* Cache is fresh, use it */
-                task_count = task_count_cache[index];
-            }
-            else
-            {
-                /* Cache expired or empty, recalculate */
-                task_count = count_user_tasks_global(uid, now);
-            }
+            int task_count = count_user_tasks_on_rq(cfs_rq, uid);
 
             delta_exec *= task_count;
             if (printk_ratelimit())
