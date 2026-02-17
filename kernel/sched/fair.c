@@ -65,18 +65,6 @@ static unsigned int sysctl_entangled_cpu2 = 0;
 /* Task2 code block - start */
 #define MAX_USERS 1024
 
-static inline int uid_to_index(uid_t uid)
-{
-    if (uid >= 1000 && uid < 1000 + MAX_USERS)
-    {
-        return uid - 1000;
-    }
-    else
-    {
-        return -1;
-    }
-}
-
 /* Count tasks for a specific user on the given cfs_rq's rb-tree */
 static int count_user_tasks_on_rq(struct cfs_rq *cfs_rq, uid_t uid)
 {
@@ -1286,15 +1274,17 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	{
         struct task_struct *p = task_of(curr);
         uid_t uid = __kuid_val(task_uid(p));
-        int index = uid_to_index(uid);
 
-        if (index >= 0)
+        if (uid >= 1000 && uid < 1000 + MAX_USERS)
         {
             int task_count = count_user_tasks_on_rq(cfs_rq, uid);
 
             delta_exec *= task_count;
             if (printk_ratelimit())
-                printk(KERN_INFO "PID %d UID %u: task_count=%d\n", p->pid, uid, task_count);
+			{
+				printk(KERN_INFO "PID %d UID %u: task_count=%d\n", p->pid, uid, task_count);
+			}
+                
         }
 	}
 
