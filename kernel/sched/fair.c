@@ -65,33 +65,24 @@ static unsigned int sysctl_entangled_cpu2 = 0;
 /* Task2 code block - start */
 #define MAX_USERS 1024
 
-/* Count tasks for a specific user on the given cfs_rq's rb-tree */
-static int count_user_tasks_on_rq(struct cfs_rq *cfs_rq, uid_t uid)
+/* Count all tasks globally for a specific user */
+static int count_user_tasks_global(uid_t uid)
 {
-    struct rb_node *node;
-    struct sched_entity *se;
     int count = 0;
+    struct task_struct *p;
 
-    /* Count current running entity if it belongs to this user */
-    if (cfs_rq->curr && entity_is_task(cfs_rq->curr)) {
-        struct task_struct *p = task_of(cfs_rq->curr);
+    rcu_read_lock();
+    for_each_process(p) 
+	{
         if (__kuid_val(task_uid(p)) == uid)
+		{	
             count++;
+		}
     }
-
-    /* Walk the rb-tree of queued entities */
-    for (node = rb_first_cached(&cfs_rq->tasks_timeline); node; node = rb_next(node)) {
-        se = rb_entry(node, struct sched_entity, run_node);
-        if (entity_is_task(se)) {
-            struct task_struct *p = task_of(se);
-            if (__kuid_val(task_uid(p)) == uid)
-                count++;
-        }
-    }
+    rcu_read_unlock();
 
     return count > 0 ? count : 1;
 }
-
 /* Task2 code block - end */
 
 /*
@@ -1274,10 +1265,12 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	{
         struct task_struct *p = task_of(curr);
         uid_t uid = __kuid_val(task_uid(p));
+		int running_tasks = cfs_rq->nr_running;
+		int avilable_cpus = num_online_cpus();
 
-        if (uid >= 1000 && uid < 1000 + MAX_USERS)
+        if ((uid >= 1000 && uid < 1000 + MAX_USERS) && running_tasks > avilable_cpus)
         {
-            int task_count = count_user_tasks_on_rq(cfs_rq, uid);
+            int task_count = count_user_tasks_global(uid);
 
             delta_exec *= task_count;
             if (printk_ratelimit())
