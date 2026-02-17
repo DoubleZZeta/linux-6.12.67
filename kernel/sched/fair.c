@@ -63,6 +63,7 @@ static unsigned int sysctl_entangled_cpu2 = 0;
 /* Task1 code block - end */
 
 /* Task2 code block - start */
+#ifdef TASK_TWO
 #define MAX_USERS 1024
 
 /* Count all tasks globally for a specific user */
@@ -83,6 +84,7 @@ static int count_user_tasks_global(uid_t uid)
 
     return count > 0 ? count : 1;
 }
+#endif
 /* Task2 code block - end */
 
 /*
@@ -1261,6 +1263,8 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	if (unlikely(delta_exec <= 0))
 		return;
 
+	/* Task2 code block - start */
+	#ifdef TASK_TWO
 	if (entity_is_task(curr))
 	{
         struct task_struct *p = task_of(curr);
@@ -1280,6 +1284,8 @@ static void update_curr(struct cfs_rq *cfs_rq)
                 
         }
 	}
+	#endif
+	/* Task2 code block - end */
 
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
 	resched = update_deadline(cfs_rq, curr);
