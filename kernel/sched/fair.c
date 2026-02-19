@@ -59,7 +59,10 @@
 /* Task1 code block - start */
 static unsigned int sysctl_entangled_cpu1 = 0;
 static unsigned int sysctl_entangled_cpu2 = 0;
+#ifdef TASK_ONE
 #define ONE_SECOND 1000000000UL
+extern u64 jiffies_64;
+#endif
 /* Task1 code block - end */
 
 /* Task2 code block - start */
@@ -9075,22 +9078,22 @@ again:
 			{
 				WRITE_ONCE(active_cpu, other_cpu);
 				WRITE_ONCE(cpu_start_running, ktime_get_ns());
-				goto idle;
+				goto notask;
 			}
 		}
 		else if (current_active_cpu == this_cpu)
 		{
 			u64 time_elapsed = ktime_get_ns() - READ_ONCE(cpu_start_running);
-			if (time_elapsed >= ONE_SECOND)
+			if (time_elapsed >= 5*ONE_SECOND)
 			{
 				WRITE_ONCE(active_cpu, other_cpu);
 				WRITE_ONCE(cpu_start_running, ktime_get_ns());
-				goto idle;
+				goto notask;
 			}
 		}
 		else
 		{
-			goto idle;
+			goto notask;
 		}
 	}
 	#endif
@@ -9161,6 +9164,7 @@ idle:
 			goto again;
 	}
 
+notask:	
 	/*
 	 * rq is about to be idle, check if we need to update the
 	 * lost_idle_time of clock_pelt
