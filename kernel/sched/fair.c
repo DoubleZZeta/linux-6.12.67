@@ -59,8 +59,8 @@
 /* Task1 code block - start */
 static unsigned int sysctl_entangled_cpu1 = 0;
 static unsigned int sysctl_entangled_cpu2 = 0;
+
 #ifdef TASK_ONE
-#define ONE_SECOND 1000000000UL
 extern u64 jiffies_64;
 #endif
 /* Task1 code block - end */
@@ -9071,23 +9071,23 @@ again:
 			if (is_idle_task(curr_other))
 			{
 				WRITE_ONCE(active_cpu, this_cpu);
-				WRITE_ONCE(cpu_start_running, ktime_get_ns());
+				WRITE_ONCE(cpu_start_running, jiffies_64);
 			}
 			// Let other run
 			else
 			{
 				WRITE_ONCE(active_cpu, other_cpu);
-				WRITE_ONCE(cpu_start_running, ktime_get_ns());
+				WRITE_ONCE(cpu_start_running, jiffies_64);
 				goto notask;
 			}
 		}
 		else if (current_active_cpu == this_cpu)
 		{
-			u64 time_elapsed = ktime_get_ns() - READ_ONCE(cpu_start_running);
-			if (time_elapsed >= 5*ONE_SECOND)
+			u64 time_elapsed = jiffies_64 - READ_ONCE(cpu_start_running);
+			if (time_elapsed >= HZ*5)
 			{
 				WRITE_ONCE(active_cpu, other_cpu);
-				WRITE_ONCE(cpu_start_running, ktime_get_ns());
+				WRITE_ONCE(cpu_start_running, jiffies_64);
 				goto notask;
 			}
 		}
@@ -9164,7 +9164,9 @@ idle:
 			goto again;
 	}
 
+#ifdef TASK_ONE
 notask:	
+#endif
 	/*
 	 * rq is about to be idle, check if we need to update the
 	 * lost_idle_time of clock_pelt
