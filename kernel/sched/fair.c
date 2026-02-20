@@ -65,31 +65,6 @@ extern u64 jiffies_64;
 #endif
 /* Task1 code block - end */
 
-/* Task2 code block - start */
-#ifdef TASK_TWO
-#define MAX_USERS 1024
-
-/* Count all tasks globally for a specific user */
-static int count_user_tasks_global(uid_t uid)
-{
-    int count = 0;
-    struct task_struct *p;
-
-    rcu_read_lock();
-    for_each_process(p) 
-	{
-        if (__kuid_val(task_uid(p)) == uid)
-		{	
-            count++;
-		}
-    }
-    rcu_read_unlock();
-
-    return count > 0 ? count : 1;
-}
-#endif
-/* Task2 code block - end */
-
 /*
  * The initial- and re-scaling of tunables is configurable
  *
@@ -1265,30 +1240,6 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	delta_exec = update_curr_se(rq, curr);
 	if (unlikely(delta_exec <= 0))
 		return;
-
-	/* Task2 code block - start */
-	#ifdef TASK_TWO
-	if (entity_is_task(curr))
-	{
-        struct task_struct *p = task_of(curr);
-        uid_t uid = __kuid_val(task_uid(p));
-		int running_tasks = cfs_rq->nr_running;
-		int avilable_cpus = num_online_cpus();
-
-        if ((uid >= 1000 && uid < 1000 + MAX_USERS) && running_tasks > avilable_cpus)
-        {
-            int task_count = count_user_tasks_global(uid);
-
-            delta_exec *= task_count;
-            if (printk_ratelimit())
-			{
-				printk(KERN_INFO "PID %d UID %u: task_count=%d\n", p->pid, uid, task_count);
-			}
-                
-        }
-	}
-	#endif
-	/* Task2 code block - end */
 
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
 	resched = update_deadline(cfs_rq, curr);
