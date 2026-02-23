@@ -202,7 +202,10 @@ int main(int argc, char *argv[])
                 continue;
             }
         }
-        sleep(1);
+        if(duration > 0)
+        {
+            sleep(1);
+        }
         duration--;
     }
     closedir(proc_dir);
