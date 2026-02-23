@@ -57,17 +57,19 @@
 
 
 /* Task1 code block - start */
+#ifdef TASK_ONE
 static unsigned int sysctl_entangled_cpu1 = 0;
 static unsigned int sysctl_entangled_cpu2 = 0;
 
-#ifdef TASK_ONE
 extern u64 jiffies_64;
 #endif
 /* Task1 code block - end */
 
 /* Task2 code block - start */
 #ifdef TASK_TWO
-#define MAX_USERS 1024
+#define MAX_USERS 100
+
+static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, unsigned long weight);
 
 /* Count all tasks globally for a specific user */
 static int count_user_tasks_global(uid_t uid)
@@ -86,6 +88,24 @@ static int count_user_tasks_global(uid_t uid)
     rcu_read_unlock();
 
     return count > 0 ? count : 1;
+}
+
+static int get_global_running_tasks(void)
+{
+    int count = 0;
+    struct task_struct *p;
+
+    rcu_read_lock();
+    for_each_process(p) 
+	{
+        if (__kuid_val(task_uid(p)) >=1000)
+		{	
+            count++;
+		}
+    }
+    rcu_read_unlock();
+
+    return count;
 }
 #endif
 /* Task2 code block - end */
@@ -187,6 +207,7 @@ static struct ctl_table sched_fair_sysctls[] = {
 	},
 #endif /* CONFIG_NUMA_BALANCING */
 /* coursework1 code block - start */
+#ifdef TASK_ONE
 {
 	.procname	= "entangled_cpus_1",
 	.data		= &sysctl_entangled_cpu1,
@@ -201,6 +222,7 @@ static struct ctl_table sched_fair_sysctls[] = {
 	.mode		= 0644,
 	.proc_handler	= proc_dointvec_minmax,
 },
+#endif
 /* coursework1 code block - end */
 };
 
@@ -1272,20 +1294,30 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	{
         struct task_struct *p = task_of(curr);
         uid_t uid = __kuid_val(task_uid(p));
-		int running_tasks = cfs_rq->nr_running;
 		int avilable_cpus = num_online_cpus();
+		int running_tasks = get_global_running_tasks();
 
-        if ((uid >= 1000 && uid < 1000 + MAX_USERS) && running_tasks > avilable_cpus)
+        if ((uid >= 1000) && (running_tasks > avilable_cpus))
         {
             int task_count = count_user_tasks_global(uid);
 
-            delta_exec *= task_count;
-            if (printk_ratelimit())
+			unsigned long new_weight = NICE_0_LOAD / task_count;
+        
+        	if (curr->load.weight != new_weight)
 			{
-				printk(KERN_INFO "PID %d UID %u: task_count=%d\n", p->pid, uid, task_count);
+            	reweight_entity(cfs_rq, curr, new_weight);
 			}
-                
         }
+		else if ((uid >= 1000) && (running_tasks <= avilable_cpus))
+		{
+			unsigned long new_weight = NICE_0_LOAD;
+		
+			if (curr->load.weight != new_weight)
+			{
+				reweight_entity(cfs_rq, curr, new_weight);
+			}
+
+		}
 	}
 	#endif
 	/* Task2 code block - end */
@@ -9034,6 +9066,8 @@ static void set_next_task_fair(struct rq *rq, struct task_struct *p, bool first)
 #ifdef TASK_ONE
 static int active_cpu = -1;
 static u64 cpu_start_running = 0;
+static int last_cpu1 = -1;
+static int last_cpu2 = -1;
 #endif
 
 struct task_struct *
@@ -9047,6 +9081,19 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf
 	int entangled_cpu1 = READ_ONCE(sysctl_entangled_cpu1);
 	int entangled_cpu2 = READ_ONCE(sysctl_entangled_cpu2);
 	int this_cpu = cpu_of(rq);
+
+	int current_active_cpu = READ_ONCE(active_cpu);
+	int other_cpu = (this_cpu == entangled_cpu1) ? entangled_cpu2 : entangled_cpu1;
+	struct rq *rq_other = cpu_rq(other_cpu);
+	struct task_struct *curr_other = rq_other->curr;
+
+	if (entangled_cpu1 != last_cpu1 || entangled_cpu2 != last_cpu2) 
+	{
+		WRITE_ONCE(active_cpu, -1);
+		WRITE_ONCE(cpu_start_running, 0);
+		WRITE_ONCE(last_cpu1, entangled_cpu1);
+		WRITE_ONCE(last_cpu2, entangled_cpu2);
+	}	
 	#endif
 
 again:
@@ -9058,12 +9105,6 @@ again:
 	if ((entangled_cpu1 != entangled_cpu2) && 
 		(this_cpu == entangled_cpu1 || this_cpu == entangled_cpu2))
 	{	
-		int current_active_cpu = READ_ONCE(active_cpu);
-
-		int other_cpu = (this_cpu == entangled_cpu1) ? entangled_cpu2 : entangled_cpu1;
-		struct rq *rq_other = cpu_rq(other_cpu);
-		struct task_struct *curr_other = rq_other->curr;
-
 		// At the start no cpu is set, pick one
 		if (current_active_cpu == -1)
 		{

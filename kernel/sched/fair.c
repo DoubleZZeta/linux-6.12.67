@@ -68,6 +68,9 @@ extern u64 jiffies_64;
 /* Task2 code block - start */
 #ifdef TASK_TWO
 #define MAX_USERS 100
+
+static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, unsigned long weight);
+
 /* Count all tasks globally for a specific user */
 static int count_user_tasks_global(uid_t uid)
 {
@@ -104,31 +107,6 @@ static int get_global_running_tasks(void)
 
     return count;
 }
-
-// static int count_active_users(void)
-// {
-//     uid_t seen[MAX_USERS];
-//     int count = 0;
-//     struct task_struct *p;
-
-//     rcu_read_lock();
-//     for_each_process(p)
-//     {
-//         uid_t uid = __kuid_val(task_uid(p));
-//         if (uid < 1000)
-//             continue;
-//         int found = 0;
-//         for (int i = 0; i < count; i++)
-//         {
-//             if (seen[i] == uid) { found = 1; break; }
-//         }
-//         if (!found && count < MAX_USERS)
-//             seen[count++] = uid;
-//     }
-//     rcu_read_unlock();
-
-//     return count;
-// }
 #endif
 /* Task2 code block - end */
 
@@ -1322,15 +1300,24 @@ static void update_curr(struct cfs_rq *cfs_rq)
         if ((uid >= 1000) && (running_tasks > avilable_cpus))
         {
             int task_count = count_user_tasks_global(uid);
-			// int num_users  = count_active_users();
 
-			delta_exec = delta_exec * task_count;
-            if (printk_ratelimit())
+			unsigned long new_weight = NICE_0_LOAD / task_count;
+        
+        	if (curr->load.weight != new_weight)
 			{
-				printk(KERN_INFO "PID %d UID %u: task_count=%d\n", p->pid, uid, task_count);
+            	reweight_entity(cfs_rq, curr, new_weight);
 			}
-                
         }
+		else if ((uid >= 1000) && (running_tasks <= avilable_cpus))
+		{
+			unsigned long new_weight = NICE_0_LOAD;
+		
+			if (curr->load.weight != new_weight)
+			{
+				reweight_entity(cfs_rq, curr, new_weight);
+			}
+
+		}
 	}
 	#endif
 	/* Task2 code block - end */
@@ -9079,6 +9066,8 @@ static void set_next_task_fair(struct rq *rq, struct task_struct *p, bool first)
 #ifdef TASK_ONE
 static int active_cpu = -1;
 static u64 cpu_start_running = 0;
+static int last_cpu1 = -1;
+static int last_cpu2 = -1;
 #endif
 
 struct task_struct *
@@ -9097,6 +9086,14 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf
 	int other_cpu = (this_cpu == entangled_cpu1) ? entangled_cpu2 : entangled_cpu1;
 	struct rq *rq_other = cpu_rq(other_cpu);
 	struct task_struct *curr_other = rq_other->curr;
+
+	if (entangled_cpu1 != last_cpu1 || entangled_cpu2 != last_cpu2) 
+	{
+		WRITE_ONCE(active_cpu, -1);
+		WRITE_ONCE(cpu_start_running, 0);
+		WRITE_ONCE(last_cpu1, entangled_cpu1);
+		WRITE_ONCE(last_cpu2, entangled_cpu2);
+	}	
 	#endif
 
 again:
@@ -9105,7 +9102,6 @@ again:
 		goto idle;
 
 	#ifdef TASK_ONE
-check:
 	if ((entangled_cpu1 != entangled_cpu2) && 
 		(this_cpu == entangled_cpu1 || this_cpu == entangled_cpu2))
 	{	
